@@ -61,6 +61,75 @@ def switch_refinement(targeted_m41_text: str, goal_parameter: str, state: str) -
     modified_m41_text = '\n'.join(m41_lines)
     return modified_m41_text
 
+def change_m41_population(m41_text: str, target_pop1: float, target_pop2: float = 0.0) -> str:
+
+    #perpare strings to inject into m41 file
+    first_mol_string = f'{(target_pop1/100):.6f}' 
+    second_mol_string = f'{(target_pop2/100):.6f}' 
+
+    m41_lines = m41_text.splitlines()
+
+    #the second pops default to 0.000000 anyway, so we can inject both always
+
+    pop1_line = m41_lines[2]
+    pop2_line = m41_lines[6]
+
+    pop1_line = pop1_line[:1] + first_mol_string + pop1_line[9:]
+    pop2_line = pop2_line[:1] + second_mol_string + pop2_line[9:]
+
+    m41_lines[2] = pop1_line
+    m41_lines[6] = pop2_line
+
+    modified_m41_text =  '\n'.join(m41_lines)
+
+    return modified_m41_text
+
+def prepare_multipercent_init_dirs(templates_path: os.PathLike, output_path: os.PathLike, percent_vals: list[float], double_molecule: bool) -> os.PathLike:
+
+    mol_name = [name[:-4] for name in os.listdir(templates_path) if name[-4:] == '.m41'][0]
+    init_templates_output_dir = output_path
+
+    if double_molecule:
+        for first_mol_perc in percent_vals:
+            for second_mol_perc in percent_vals:
+
+                #prepare an init dir for this run, named ***__***_init, where *** are the percentages (double digit precision) with no commas
+                first_mol_perc_parsed = f'{first_mol_perc:.2f}'
+                first_mol_perc_parsed = first_mol_perc_parsed.replace(r'.', '')
+                second_mol_perc_parsed = f'{second_mol_perc:.2f}'
+                second_mol_perc_parsed = second_mol_perc_parsed.replace(r'.', '')
+                dir_name = f'{first_mol_perc_parsed}__{second_mol_perc_parsed}_init'
+                dir_path = os.path.join(output_path, dir_name)
+
+                #prepare the template directory for these % vals
+                copytree(templates_path, dir_path, dirs_exist_ok=True)
+
+                #change the initial percentages in the m41 file
+                m41_file_path = os.path.join(dir_path, f'{mol_name}.m41')
+                m41_text = load_m41_file(m41_file_path)
+                modified_m41_text = change_m41_population(m41_text, first_mol_perc, second_mol_perc)
+                save_m41_file(modified_m41_text, m41_file_path)
+
+    elif not double_molecule:
+        for mol_perc in percent_vals:
+
+            #prepare an init dir for this run, named ***_init, where *** is the percentage (double digit precision) with no commas
+            mol_perc_parsed = f'{mol_perc:.2f}'
+            mol_perc_parsed = mol_perc_parsed.replace(r'.', '')
+            dir_name = f'{mol_perc_parsed}_init'
+            dir_path = os.path.join(output_path, dir_name)
+
+            #prepare the template directory for these % vals
+            copytree(templates_path, dir_path, dirs_exist_ok=True)
+
+            #change the initial percentages in the m41 file
+            m41_file_path = os.path.join(dir_path, f'{mol_name}.m41')
+            m41_text = load_m41_file(m41_file_path)
+            modified_m41_text = change_m41_population(m41_text, mol_perc)
+            save_m41_file(modified_m41_text, m41_file_path)
+    
+    return init_templates_output_dir
+
 def refine(templates_path: os.PathLike, output_path: os.PathLike, parameter_cycle: list[list[str]], nb_cycles: int) -> None:
     
     if not os.path.exists(output_path):
@@ -106,6 +175,20 @@ def refine(templates_path: os.PathLike, output_path: os.PathLike, parameter_cycl
             save_m41_file(m41_text, os.path.join(last_iter_path, f'{mol_name}.m41'))
     return
 
+def refine_multipercentage(templates_path: os.PathLike, parameter_cycle: list[list[str]], nb_cycles: int) -> None:
+
+    for current_template_path in os.listdir(templates_path):
+        if current_template_path[-4:] != 'init':
+            continue
+        current_template_path_rooted = os.path.join(templates_path, current_template_path)
+        #cut out the 'init' and replace it for 'run' in the dirname
+        output_path = current_template_path_rooted[:-4] + 'run'
+        refine(templates_path=current_template_path_rooted,
+            output_path=output_path,
+            parameter_cycle=parameter_cycle,
+            nb_cycles=nb_cycles)
+    return
+
 if __name__ == '__main__':
 
     #       User notes:
@@ -123,22 +206,29 @@ if __name__ == '__main__':
     #   
     #   In order to refine two things at once, place them in a nested list next to each other:  ['N1', 'RG1']
 
-
-    OUTPUT_PATH = r"C:\Users\piotr\Documents\VS_Code\working_dirs\cudppe_ref\all_Results\anc_CuDPPE_g4_layer_newrigids\att2"
-    TEMPLATES_PATH = r"C:\Users\piotr\Documents\VS_Code\working_dirs\cudppe_ref\all_Results\anc_CuDPPE_g4_layer_newrigids\init"
-    NB_CYCLES = 20
+    TEMPLATES_PATH = r"C:\Users\piotr\Documents\VS_Code\working_dirs\cudppe_ref\all_Results\anc_CuDPPE_g4_layer_crosspercent\template"
+    OUTPUT_PATH = r"C:\Users\piotr\Documents\VS_Code\working_dirs\cudppe_ref\all_Results\anc_CuDPPE_g4_layer_crosspercent"
+    NB_CYCLES = 30
     GOAL_PARAMS = [['Cu1'],
-                   ['N1','RG1'],
-                   ['P1','RG2'],
-                   ['pop1a','temp1'],
                    ['Cu2'],
-                   ['N1a','RG4'],
-                   ['P3','RG5'],
-                   ['pop1b','temp1']]
+                   ['temp1']]
 
+    # Single refinement
 
     refine(templates_path=TEMPLATES_PATH,
-           output_path=OUTPUT_PATH,
-           parameter_cycle=GOAL_PARAMS,
-           nb_cycles=NB_CYCLES)
-    
+        output_path=OUTPUT_PATH,
+        parameter_cycle=GOAL_PARAMS,
+        nb_cycles=NB_CYCLES)
+
+    # Multipercentage scan for fully merged (1 dataset) files only
+
+    PERCENT_VALS = [0.25, 0.50, 0.75, 1.00, 1.50, 2.00]
+    DOUBLE_MOLECULE = True
+
+    init_dir_path = prepare_multipercent_init_dirs(templates_path=TEMPLATES_PATH,
+                                   output_path=OUTPUT_PATH,
+                                   percent_vals=PERCENT_VALS,
+                                   double_molecule=DOUBLE_MOLECULE)
+    refine_multipercentage(templates_path=init_dir_path,
+                           parameter_cycle=GOAL_PARAMS,
+                           nb_cycles=NB_CYCLES)
